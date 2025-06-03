@@ -1,0 +1,28 @@
+{
+  "name": "nostr-toss-up",
+  "version": "1.0.0",
+  "description": "Simple Nostr recommendation API for new and isolated users",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "ts-node src/server.ts",
+    "collect": "ts-node scripts/collect.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["nostr", "recommendation", "api", "social"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "nostr-tools": "^2.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0",
+    "ts-node": "^10.9.0"
+  }
+}
