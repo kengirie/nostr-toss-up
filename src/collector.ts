@@ -235,7 +235,23 @@ export class DataCollector {
   }
 
   /**
-   * 新規ユーザーを特定 (30日以内に作成)
+   * 日本語文字を含むユーザーかどうかを判定
+   * ひらがな（\u3040-\u309F）とカタカナ（\u30A0-\u30FF）を検出
+   */
+  private isJapaneseUser(profile: any): boolean {
+    if (!profile) return false;
+
+    const japanesePattern = /[\u3040-\u309F\u30A0-\u30FF]/;
+
+    // name または about に日本語文字が含まれているかチェック
+    const name = profile.name || '';
+    const about = profile.about || '';
+
+    return japanesePattern.test(name) || japanesePattern.test(about);
+  }
+
+  /**
+   * 新規ユーザーを特定 (30日以内に作成、日本語文字を含むユーザーのみ)
    */
   private identifyNewUsers(
     profiles: Array<{pubkey: string, profile: any, createdAt: number}>
@@ -243,7 +259,7 @@ export class DataCollector {
     const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
 
     const newUsers = profiles
-      .filter(p => p.createdAt > thirtyDaysAgo)
+      .filter(p => p.createdAt > thirtyDaysAgo && this.isJapaneseUser(p.profile)) // 日本語文字を含むユーザーのみ
       .sort((a, b) => b.createdAt - a.createdAt) // Sort by newest first
       .slice(0, 10) // Take top 10
       .map(p => ({
@@ -256,7 +272,7 @@ export class DataCollector {
   }
 
   /**
-   * 孤立ユーザーを特定 (低いPageRankスコア)
+   * 孤立ユーザーを特定 (低いPageRankスコア、日本語文字を含むユーザーのみ)
    */
   private identifyIsolatedUsers(
     profiles: Array<{pubkey: string, profile: any, createdAt: number}>,
@@ -268,7 +284,7 @@ export class DataCollector {
         profile: p.profile,
         score: pageRankScores.get(p.pubkey) || 0
       }))
-      .filter(u => u.score > 0) // Only users with calculated scores
+      .filter(u => u.score > 0 && this.isJapaneseUser(u.profile)) // 日本語文字を含むユーザーのみ
       .sort((a, b) => a.score - b.score) // Sort by lowest score first
       .slice(0, 10); // Take 10 most isolated
 
