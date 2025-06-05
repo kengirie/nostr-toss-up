@@ -1,0 +1,25 @@
+{
+	"name": "nostr-toss-up-workers",
+	"version": "1.0.0",
+	"description": "Nostr新規ユーザー検出システム - Cloudflare Workers版",
+	"private": true,
+	"scripts": {
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev",
+		"start": "wrangler dev",
+		"test": "vitest",
+		"cf-typegen": "wrangler types",
+		"db:migrate": "wrangler d1 migrations apply nostr-users-db",
+		"db:create": "wrangler d1 create nostr-users-db"
+	},
+	"devDependencies": {
+		"@cloudflare/vitest-pool-workers": "^0.8.19",
+		"typescript": "^5.5.2",
+		"vitest": "~3.0.7",
+		"wrangler": "^4.19.1"
+	},
+	"dependencies": {
+		"nostr-tools": "^2.14.1"
+	},
+	"keywords": ["nostr", "recommendation", "api", "cloudflare-workers", "d1", "new-users"]
+}

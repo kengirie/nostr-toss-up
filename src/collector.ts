@@ -65,7 +65,7 @@ export class DataCollector {
 
       // Step 5: Identify target users
       console.log('🔍 Identifying new and isolated users...');
-      const newUsers = this.identifyNewUsers(userProfiles);
+      const newUsers = await this.identifyNewUsersImproved(userProfiles);
       const isolatedUsers = this.identifyIsolatedUsers(userProfiles, pageRankScores);
 
       console.log(`🆕 Found ${newUsers.length} new users`);
@@ -251,7 +251,140 @@ export class DataCollector {
   }
 
   /**
+   * 指定されたユーザーの最初のプロフィール作成日時を取得
+   * @param pubkey ユーザーの公開鍵（hex形式）
+   * @returns 最初のkind0イベントのcreated_at、見つからない場合はnull
+   */
+  private async getFirstProfileCreationTime(pubkey: string): Promise<number | null> {
+    try {
+      console.log(`🔍 Getting first profile creation time for ${pubkey.substring(0, 8)}...`);
+
+      const events = await this.pool.querySync([this.relayUrl], {
+        kinds: [0], // Profile metadata
+        authors: [pubkey],
+        limit: 50 // Get enough events to find the oldest one
+      });
+
+      if (events.length === 0) {
+        console.log(`⚠️ No profile events found for ${pubkey.substring(0, 8)}`);
+        return null;
+      }
+
+      // Find the oldest event (minimum created_at)
+      const oldestEvent = events.reduce((oldest, current) =>
+        current.created_at < oldest.created_at ? current : oldest
+      );
+
+      const firstCreatedAt = oldestEvent.created_at;
+      console.log(`📅 First profile for ${pubkey.substring(0, 8)}: ${new Date(firstCreatedAt * 1000).toISOString()}`);
+
+      return firstCreatedAt;
+    } catch (error) {
+      console.error(`❌ Error getting first profile creation time for ${pubkey.substring(0, 8)}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * 複数ユーザーの最初のプロフィール作成日時を効率的に取得
+   * @param pubkeys ユーザー公開鍵の配列
+   * @returns pubkey -> 最初のcreated_at のマップ
+   */
+  private async batchGetFirstProfileTimes(pubkeys: string[]): Promise<Map<string, number>> {
+    const results = new Map<string, number>();
+    const batchSize = 20; // Process 20 users at a time to avoid overwhelming the relay
+
+    console.log(`🔄 Getting first profile times for ${pubkeys.length} users in batches of ${batchSize}...`);
+
+    for (let i = 0; i < pubkeys.length; i += batchSize) {
+      const batch = pubkeys.slice(i, i + batchSize);
+      console.log(`📦 Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(pubkeys.length / batchSize)} (${batch.length} users)`);
+
+      // Process batch in parallel with rate limiting
+      const batchPromises = batch.map(async (pubkey, index) => {
+        // Add small delay to avoid overwhelming the relay
+        await new Promise(resolve => setTimeout(resolve, index * 100));
+
+        const firstTime = await this.getFirstProfileCreationTime(pubkey);
+        if (firstTime !== null) {
+          results.set(pubkey, firstTime);
+        }
+      });
+
+      try {
+        await Promise.all(batchPromises);
+      } catch (error) {
+        console.error(`❌ Error processing batch starting at index ${i}:`, error);
+        // Continue with next batch even if current batch fails
+      }
+
+      // Add delay between batches to be respectful to the relay
+      if (i + batchSize < pubkeys.length) {
+        console.log('⏳ Waiting 2 seconds before next batch...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+
+    console.log(`✅ Successfully retrieved first profile times for ${results.size}/${pubkeys.length} users`);
+    return results;
+  }
+
+  /**
+   * 改善された新規ユーザー判定ロジック
+   * 最初のプロフィール作成日時を基準に判定
+   */
+  private async identifyNewUsersImproved(
+    profiles: Array<{pubkey: string, profile: any, createdAt: number}>
+  ): Promise<NostrUser[]> {
+    const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+    console.log(`🔍 Identifying new users (created after ${new Date(thirtyDaysAgo * 1000).toISOString()})...`);
+
+    // Filter Japanese users first to reduce API calls
+    const japaneseUsers = profiles.filter(p => this.isJapaneseUser(p.profile));
+    console.log(`🇯🇵 Found ${japaneseUsers.length} Japanese users out of ${profiles.length} total`);
+
+    if (japaneseUsers.length === 0) {
+      console.log('⚠️ No Japanese users found');
+      return [];
+    }
+
+    // Get first profile creation times for all Japanese users
+    const pubkeys = japaneseUsers.map(p => p.pubkey);
+    const firstProfileTimes = await this.batchGetFirstProfileTimes(pubkeys);
+
+    // Filter users based on first profile creation time
+    const candidateUsers: Array<{pubkey: string, profile: any, firstCreatedAt: number}> = [];
+
+    for (const user of japaneseUsers) {
+      const firstCreatedAt = firstProfileTimes.get(user.pubkey);
+      if (firstCreatedAt && firstCreatedAt > thirtyDaysAgo) {
+        candidateUsers.push({
+          pubkey: user.pubkey,
+          profile: user.profile,
+          firstCreatedAt: firstCreatedAt
+        });
+      }
+    }
+
+    console.log(`🆕 Found ${candidateUsers.length} truly new users (first profile within 30 days)`);
+
+    // Sort by newest first and take top 10
+    const newUsers = candidateUsers
+      .sort((a, b) => b.firstCreatedAt - a.firstCreatedAt)
+      .slice(0, 10)
+      .map(p => ({
+        pubkey: nip19.npubEncode(p.pubkey),
+        reason: 'new_user' as const,
+        createdAt: new Date(p.firstCreatedAt * 1000).toISOString()
+      }));
+
+    console.log(`✅ Selected ${newUsers.length} new users for recommendation`);
+    return newUsers;
+  }
+
+  /**
    * 新規ユーザーを特定 (30日以内に作成、日本語文字を含むユーザーのみ)
+   * @deprecated Use identifyNewUsersImproved instead
    */
   private identifyNewUsers(
     profiles: Array<{pubkey: string, profile: any, createdAt: number}>
