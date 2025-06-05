@@ -1,219 +1,134 @@
-# Nostr投稿推薦API
+# Nostr新規ユーザー検出システム
 
-**✅ 実装完了！** 新規ユーザーや孤立したユーザーの投稿を推薦するAPIサービスです。
-**nostr-tools**を使用してリアルなNostrデータを収集・提供します。
+Nostrプロトコルにおける新規ユーザーと孤立ユーザーを検出し、推薦するAPIシステムです。
 
-## 🎯 概要
-
-このAPIは、**wss://yabu.me**リレーからリアルデータを収集し、以下のユーザーの投稿を推薦します：
-- **新規ユーザー**: アカウント作成から30日以内のユーザー（10名）
-- **孤立ユーザー**: PageRankスコアが低いユーザー（10名）
-
-## ✨ 実装済み機能
-
-- **✅ リアルNostrデータ**: yabu.meリレーから実際のプロフィール・投稿を収集
-- **✅ PageRankアルゴリズム**: ソーシャルグラフ分析による孤立度判定
-- **✅ 本物のnpub/nevent**: 実際のNostr識別子を使用
-- **✅ 高速データ収集**: 4秒で500+プロフィール、30,000+ユーザーのグラフ分析
-- **✅ 自動分類**: 新規・孤立ユーザーの自動判定
-
-## 🚀 クイックスタート
-
-### 1. 依存関係のインストール
-
-```bash
-npm install
-```
-
-### 2. リアルデータ収集
-
-```bash
-npm run collect
-```
-
-**実際の処理内容:**
-- yabu.meリレーに接続
-- 500+のユーザープロフィールを取得
-- 30,000+ユーザーのフォローグラフを構築
-- PageRankスコアを計算
-- 新規ユーザー10名を特定
-- 孤立ユーザー10名を特定
-- 最新投稿30件を収集
-- 実際のnpub/nevent IDを生成
-
-### 3. APIサーバー起動
-
-```bash
-# 開発モード
-npm run dev
-
-# 本番モード
-npm run build
-npm start
-```
-
-サーバーは `http://localhost:3000` で起動します。
-
-## 📡 API エンドポイント
-
-### 推薦ユーザー取得
-
-```http
-GET /users
-```
-
-**レスポンス例（実際のデータ）:**
-```json
-{
-  "users": [
-    {
-      "pubkey": "npub1d30mhvhd0sagmu83wdm26wqk00heptfn05xvgmfx7r9xscstnfcs7xynp3",
-      "reason": "new_user"
-    },
-    {
-      "pubkey": "npub19we2h0793y4hhk500r2ndqkez0xf53rtghs3j20sjdwclh7tgz7s36kl6t",
-      "reason": "new_user"
-    },
-    {
-      "pubkey": "npub184l8wc3980x57rsd2gvjdyxef67tku4sdkhh4xpf0rmnw64ghpas3meh6g",
-      "reason": "isolated_user"
-    }
-  ],
-  "count": 20,
-  "lastUpdated": "2025-06-03T13:01:46.264Z"
-}
-```
-
-### 推薦投稿取得
-
-```http
-GET /posts
-```
-
-**レスポンス例（実際のデータ）:**
-```json
-{
-  "posts": [
-    {
-      "nevent": "nevent1qyxhwumn8ghj77tpvf6jumt9qqspu0cs8tw977c288kxq0vm08fkrksagymevatdez2znatdy8dzdhc3cyfjp",
-      "authorPubkey": "npub19we2h0793y4hhk500r2ndqkez0xf53rtghs3j20sjdwclh7tgz7s36kl6t",
-      "createdAt": "2025-06-03T11:45:27.000Z",
-      "reason": "from_new_user"
-    },
-    {
-      "nevent": "nevent1qyxhwumn8ghj77tpvf6jumt9qqs2j6pm3er8vjvyu5vzs02wdh6nafzxcqz9tc69kcla6c7yp5r6tuqv4rfhu",
-      "authorPubkey": "npub1hdcq7avmvn7pwr80jpzql4cpgczqw7dcwy24a77v4e7seztcdf9q2pjd3h",
-      "createdAt": "2025-06-03T08:52:23.000Z",
-      "reason": "from_new_user"
-    }
-  ],
-  "count": 30,
-  "lastUpdated": "2025-06-03T13:01:46.265Z"
-}
-```
-
-## 🔧 使用方法
-
-### cURLでのテスト
-
-```bash
-# 推薦ユーザー取得
-curl http://localhost:3000/users
-
-# 推薦投稿取得
-curl http://localhost:3000/posts
-
-# ヘルスチェック
-curl http://localhost:3000/
-```
-
-### 定期データ収集
-
-cron jobでデータ収集を自動化：
-
-```bash
-# crontab -e で以下を追加（毎日午前2時に実行）
-0 2 * * * cd /path/to/nostr-toss-up && npm run collect
-```
-
-## 📁 プロジェクト構造
+## 🏗️ プロジェクト構造
 
 ```
 nostr-toss-up/
-├── src/
-│   ├── server.ts          # Express サーバー
-│   ├── collector.ts       # データ収集ロジック
-│   ├── types.ts           # TypeScript型定義
-│   └── routes/
-│       ├── users.ts       # ユーザー推薦API
-│       └── posts.ts       # 投稿推薦API
-├── scripts/
-│   └── collect.ts         # データ収集スクリプト
-├── data/                  # JSONデータファイル（自動生成）
-│   ├── users.json
-│   └── posts.json
-├── package.json
-├── tsconfig.json
-├── DESIGN.md              # 設計書
-└── README.md
+├── cloudflare-workers/          # 🚀 本番用 Cloudflare Workers実装
+│   ├── src/                     # Workers用ソースコード
+│   ├── migrations/              # D1データベースマイグレーション
+│   ├── wrangler.jsonc          # Cloudflare Workers設定
+│   └── README.md               # Workers版の詳細ドキュメント
+├── express-api/                 # 🧪 開発用 Express API実装
+│   ├── src/                     # Express用ソースコード
+│   ├── data/                    # JSONデータファイル
+│   ├── scripts/                 # データ収集スクリプト
+│   └── README.md               # Express版の詳細ドキュメント
+├── DESIGN.md                    # システム設計書
+├── IMPLEMENTATION_PLAN.md       # 実装計画書
+├── CLOUDFLARE_WORKERS_MIGRATION_PLAN.md  # Workers移行計画
+└── NEW_USER_DETECTION_PLAN.md  # 新規ユーザー検出設計
 ```
 
-## 🛠️ 開発
+## 🎯 実装版の選択
 
-### スクリプト
+### 🚀 本番環境推奨: Cloudflare Workers版
+
+**ディレクトリ:** `cloudflare-workers/`
+
+**特徴:**
+- ✅ サーバーレス・高性能・低コスト
+- ✅ D1データベースによる永続化
+- ✅ KVストアによる高速キャッシュ
+- ✅ 自動スケーリング
+- ✅ Cronジョブによる自動データ収集
+- ✅ pubkeyベースの確実な新規ユーザー検出
+
+**本番URL:** https://nostr-toss-up-workers.konnichiha7898.workers.dev
+
+### 🧪 開発・学習用: Express API版
+
+**ディレクトリ:** `express-api/`
+
+**特徴:**
+- ✅ シンプルなNode.js + Express実装
+- ✅ JSONファイルベースのデータ保存
+- ✅ ローカル開発に適している
+- ✅ 理解しやすい構造
+
+## 🚀 クイックスタート
+
+### Cloudflare Workers版（推奨）
 
 ```bash
-# 開発サーバー起動（ホットリロード）
+cd cloudflare-workers
+
+# 依存関係インストール
+npm install
+
+# ローカル開発
 npm run dev
 
-# TypeScriptビルド
-npm run build
+# 本番デプロイ
+npm run deploy
+```
 
-# 本番サーバー起動
-npm start
+### Express API版
 
-# データ収集実行
+```bash
+cd express-api
+
+# 依存関係インストール
+npm install
+
+# 開発サーバー起動
+npm run dev
+
+# データ収集
 npm run collect
 ```
 
-### 環境変数
+## 📋 API エンドポイント
 
-```bash
-# ポート番号（デフォルト: 3000）
-PORT=3000
-```
+両実装で共通のAPIエンドポイント：
 
-## 📊 データ形式
+- `GET /` - システム情報
+- `GET /users` - 推薦ユーザー一覧
+- `GET /posts` - 推薦投稿一覧
+- `GET /health` - ヘルスチェック（Workers版のみ）
+- `GET /stats` - 統計情報（Workers版のみ）
+- `GET /check-user/{pubkey}` - 新規ユーザー判定（Workers版のみ）
 
-### ユーザー判定基準（実装済み）
+## 🔧 主要機能
 
-- **新規ユーザー**: アカウント作成から30日以内（実際のプロフィール作成日時を使用）
-- **孤立ユーザー**: PageRankアルゴリズムによる低スコア判定（実際のフォローグラフを分析）
+### 新規ユーザー検出
+- pubkeyベースの確実な追跡（Workers版）
+- 30日以内の新規登録者判定
+- データベースによる永続化
 
-### データ収集詳細
+### 推薦システム
+- 新規ユーザーの自動推薦
+- 孤立ユーザーの検出と推薦
+- PageRankアルゴリズムによる影響力分析
+- 日本語ユーザーのフィルタリング
 
-- **リレー**: wss://yabu.me
-- **分析対象**: 500+ユーザープロフィール
-- **グラフサイズ**: 30,000+ユーザーのフォロー関係
-- **収集時間**: 約4秒
-- **更新頻度**: 手動実行（`npm run collect`）
+### 自動データ収集
+- 毎日午前0時（UTC）の自動実行
+- Nostrリレーからのリアルタイムデータ取得
+- プロフィール・投稿・フォロー関係の分析
 
-### 技術仕様
+## 📖 ドキュメント
 
-- **nostr-tools**: 2.1.0
-- **PageRank**: 10回反復、減衰係数0.85
-- **データ形式**: 実際のnpub/nevent識別子
-- **投稿期間**: 過去7日間の投稿を収集
+- [システム設計書](DESIGN.md) - 全体的なシステム設計
+- [実装計画書](IMPLEMENTATION_PLAN.md) - 開発計画
+- [Workers移行計画](CLOUDFLARE_WORKERS_MIGRATION_PLAN.md) - Cloudflare Workers版の詳細設計
+- [新規ユーザー検出設計](NEW_USER_DETECTION_PLAN.md) - 新規ユーザー検出機能の設計
 
-## 🔮 今後の拡張予定
+## 🤝 開発に参加
 
-- [x] ✅ 実際のNostrリレーとの連携
-- [x] ✅ PageRankによる高度な孤立度判定アルゴリズム
-- [ ] 複数リレーからのデータ収集
-- [ ] キャッシュ機能の追加
-- [ ] 認証機能の追加
-- [ ] メトリクス・監視機能
+1. リポジトリをフォーク
+2. フィーチャーブランチを作成
+3. 変更をコミット
+4. プルリクエストを作成
 
 ## 📄 ライセンス
 
 MIT License
+
+## 🙏 謝辞
+
+- [nostr-tools](https://github.com/nbd-wtf/nostr-tools) - Nostrプロトコル実装
+- [Cloudflare Workers](https://workers.cloudflare.com/) - サーバーレス実行環境
+- Nostrコミュニティ - プロトコルの開発と普及
