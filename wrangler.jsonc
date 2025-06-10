@@ -15,7 +15,14 @@
 	},
 	"observability": {
 		"enabled": true
-	}
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "nostr-toss-up-db",
+			"database_id": "052dffae-8d57-42de-8e68-1ce23de8e5e4"
+		}
+	]
 	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
