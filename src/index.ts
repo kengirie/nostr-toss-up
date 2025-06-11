@@ -1,4 +1,6 @@
 import { SimplePool, Filter, Event, nip19 } from 'nostr-tools';
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 
 // Function to check if text contains Japanese characters
 function containsJapanese(text: string): boolean {
@@ -31,24 +33,49 @@ function eventContainsJapanese(event: Event): boolean {
   return false;
 }
 
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
+// Create a new Hono app
+const app = new Hono<{ Bindings: Env }>();
 
-    switch (url.pathname) {
-      case '/message':
-        return new Response('Hello, World!');
-      case '/random':
-        return new Response(crypto.randomUUID());
-      case '/collect-japanese-users':
-        // Start the collection process in the background
-        ctx.waitUntil(collectJapaneseUsers(env));
-        return new Response('Collection process started', { status: 200 });
-      default:
-        return new Response('Not Found', { status: 404 });
-    }
-  },
-} satisfies ExportedHandler<Env>;
+// Add CORS middleware
+app.use('*', cors());
+
+// Define routes
+app.get('/message', () => new Response('Hello, World!'));
+app.get('/random', () => new Response(crypto.randomUUID()));
+app.get('/collect-japanese-users', (c) => {
+  // Start the collection process in the background
+  c.executionCtx.waitUntil(collectJapaneseUsers(c.env));
+  return new Response('Collection process started', { status: 200 });
+});
+
+// New endpoint to get new users (registered within 30 days and existing_user=0)
+app.get('/new-users', async (c) => {
+  try {
+    // Calculate the date 30 days ago
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0]; // YYYY-MM-DD format
+
+    // Query the database for new users
+    const newUsers = await c.env.DB.prepare(
+      'SELECT pubkey FROM users WHERE registration_date >= ? AND existing_user = 0'
+    ).bind(thirtyDaysAgoStr).all();
+
+    // Extract pubkeys and return as JSON array
+    const pubkeys = newUsers.results.map(user => user.pubkey);
+
+    return Response.json(pubkeys);
+  } catch (error) {
+    console.error('Error fetching new users:', error);
+    return new Response('Internal Server Error', { status: 500 });
+  }
+});
+
+// Default 404 handler
+app.notFound(() => new Response('Not Found', { status: 404 }));
+
+// Export the Hono app as the default handler
+export default app;
 
 async function collectJapaneseUsers(env: Env): Promise<void> {
   // Create a pool to manage relay connections
