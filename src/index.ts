@@ -44,6 +44,117 @@ const app = new Hono<{ Bindings: Env }>();
 // Add CORS middleware
 app.use('*', cors());
 
+// Function to fetch the last post date for a user
+async function fetchLastPostDate(pubkeyHex: string): Promise<number> {
+  const pool = new SimplePool();
+  const relays = ['wss://yabu.me', 'wss://relay.damus.io', 'wss://relay.nostr.band'];
+
+  // Subscribe to kind1 events (text posts)
+  const filter: Filter = {
+    kinds: [1],
+    authors: [pubkeyHex],
+    limit: 1 // We only need the most recent one
+  };
+
+  try {
+    // Create a promise to get the events
+    const events: Event[] = await new Promise((resolve) => {
+      const events: Event[] = [];
+
+      const sub = pool.subscribe(relays, filter, {
+        onevent: (event) => {
+          events.push(event);
+        },
+        oneose: () => {
+          // Resolve with collected events when all relays have responded
+          resolve(events);
+          sub.close();
+        }
+      });
+
+      // Set a timeout in case relays don't respond with EOSE
+      setTimeout(() => {
+        resolve(events);
+        sub.close();
+      }, 5000);
+    });
+
+    // Close the pool
+    pool.close(relays);
+
+    if (events.length === 0) {
+      return 0; // No posts found
+    }
+
+    // Sort events by created_at (descending) to get the most recent one
+    events.sort((a, b) => b.created_at - a.created_at);
+
+    // Return the created_at timestamp of the most recent event
+    return events[0].created_at;
+  } catch (error) {
+    console.error(`Error fetching last post date for ${pubkeyHex}:`, error);
+    return 0;
+  }
+}
+
+// Function to collect and save last post dates for all users
+async function collectLastPostDates(env: Env): Promise<void> {
+  try {
+    // Get all users from the database
+    const usersResult = await env.DB.prepare('SELECT pubkey FROM users').all();
+    const users = usersResult.results.map(user => user.pubkey);
+
+    // Convert npub to hex for nostr-tools
+    const userHexMap = new Map<string, string>(); // npub -> hex
+
+    for (const npub of users) {
+      try {
+        // Skip if not a valid npub
+        if (!npub || typeof npub !== 'string' || !npub.startsWith('npub')) continue;
+
+        const decoded = nip19.decode(npub);
+        const hex = decoded.data as string;
+        userHexMap.set(npub, hex);
+      } catch (error) {
+        console.error(`Error decoding npub ${npub}:`, error);
+      }
+    }
+
+    console.log(`Fetching last post dates for ${userHexMap.size} users...`);
+
+    // Process users in batches to avoid overwhelming the relays
+    const BATCH_SIZE = 10;
+    const userEntries = Array.from(userHexMap.entries());
+
+    for (let i = 0; i < userEntries.length; i += BATCH_SIZE) {
+      const batch = userEntries.slice(i, i + BATCH_SIZE);
+
+      // Fetch last post dates in parallel
+      const lastPostPromises = batch.map(([npub, hex]) =>
+        fetchLastPostDate(hex).then(timestamp => ({ npub, timestamp }))
+      );
+
+      const results = await Promise.all(lastPostPromises);
+
+      // Save results to database
+      for (const { npub, timestamp } of results) {
+        if (timestamp > 0) {
+          // Insert or update the last post date
+          await env.DB.prepare(
+            'INSERT OR REPLACE INTO last_posts (pubkey, last_post_date) VALUES (?, ?)'
+          ).bind(npub, timestamp).run();
+        }
+      }
+
+      console.log(`Processed ${i + batch.length}/${userEntries.length} users`);
+    }
+
+    console.log('Last post dates collection completed');
+  } catch (error) {
+    console.error('Error collecting last post dates:', error);
+  }
+}
+
 // Define routes
 app.get('/message', () => new Response('Hello, World!'));
 app.get('/random', () => new Response(crypto.randomUUID()));
@@ -135,6 +246,40 @@ app.get('/calculate-pagerank', (c) => {
   // Start the calculation process in the background
   c.executionCtx.waitUntil(calculateAndSavePageRank(c.env));
   return new Response('PageRank calculation started', { status: 200 });
+});
+
+// Endpoint to collect last post dates
+app.get('/collect-last-posts', (c) => {
+  // Start the collection process in the background
+  c.executionCtx.waitUntil(collectLastPostDates(c.env));
+  return new Response('Last post dates collection started', { status: 200 });
+});
+
+// Endpoint to get users with their last post dates
+app.get('/last-posts', async (c) => {
+  try {
+    // Check if we have last post dates in the database
+    const result = await c.env.DB.prepare(
+      'SELECT COUNT(*) as count FROM last_posts'
+    ).first();
+
+    // If no data, start collection
+    if (!result || result.count === 0) {
+      // Start collection in background
+      c.executionCtx.waitUntil(collectLastPostDates(c.env));
+      return new Response('Last post dates collection started. Please try again in a few minutes.', { status: 202 });
+    }
+
+    // Get all users with their last post dates
+    const lastPosts = await c.env.DB.prepare(
+      'SELECT pubkey, last_post_date FROM last_posts ORDER BY last_post_date DESC'
+    ).all();
+
+    return Response.json(lastPosts.results);
+  } catch (error) {
+    console.error('Error fetching last post dates:', error);
+    return new Response('Internal Server Error', { status: 500 });
+  }
 });
 
 // Default 404 handler
