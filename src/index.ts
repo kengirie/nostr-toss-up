@@ -309,12 +309,16 @@ app.get('/recent-isolated-users', async (c) => {
       return new Response('Last post dates collection started. Please try again in a few minutes.', { status: 202 });
     }
 
-    // Get users with recent posts and low PageRank scores
+    // Get users with recent posts and low PageRank scores - optimized with subquery
     const recentIsolatedUsers = await c.env.DB.prepare(`
       SELECT lp.pubkey, lp.last_post_date, pr.score
-      FROM last_posts lp
+      FROM (
+        SELECT pubkey, last_post_date
+        FROM last_posts
+        WHERE last_post_date > ?
+        -- Filter first to reduce the number of rows before joining
+      ) lp
       JOIN pagerank_scores pr ON lp.pubkey = pr.pubkey
-      WHERE lp.last_post_date > ?
       ORDER BY pr.score ASC
       LIMIT 10
     `).bind(thirtyDaysAgo).all();
