@@ -282,6 +282,50 @@ app.get('/last-posts', async (c) => {
   }
 });
 
+// Endpoint to get users with recent posts (within 30 days) and low PageRank scores
+app.get('/recent-isolated-users', async (c) => {
+  try {
+    // Calculate the date 30 days ago in UNIX timestamp (seconds)
+    const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+
+    // Check if we have both PageRank scores and last post dates
+    const pageRankResult = await c.env.DB.prepare(
+      'SELECT COUNT(*) as count FROM pagerank_scores'
+    ).first();
+
+    const lastPostsResult = await c.env.DB.prepare(
+      'SELECT COUNT(*) as count FROM last_posts'
+    ).first();
+
+    // If no PageRank data, start calculation
+    if (!pageRankResult || pageRankResult.count === 0) {
+      c.executionCtx.waitUntil(calculateAndSavePageRank(c.env));
+      return new Response('PageRank calculation started. Please try again in a few minutes.', { status: 202 });
+    }
+
+    // If no last post data, start collection
+    if (!lastPostsResult || lastPostsResult.count === 0) {
+      c.executionCtx.waitUntil(collectLastPostDates(c.env));
+      return new Response('Last post dates collection started. Please try again in a few minutes.', { status: 202 });
+    }
+
+    // Get users with recent posts and low PageRank scores
+    const recentIsolatedUsers = await c.env.DB.prepare(`
+      SELECT lp.pubkey, lp.last_post_date, pr.score
+      FROM last_posts lp
+      JOIN pagerank_scores pr ON lp.pubkey = pr.pubkey
+      WHERE lp.last_post_date > ?
+      ORDER BY pr.score ASC
+      LIMIT 10
+    `).bind(thirtyDaysAgo).all();
+
+    return Response.json(recentIsolatedUsers.results);
+  } catch (error) {
+    console.error('Error fetching recent isolated users:', error);
+    return new Response('Internal Server Error', { status: 500 });
+  }
+});
+
 // Default 404 handler
 app.notFound(() => new Response('Not Found', { status: 404 }));
 
