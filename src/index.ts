@@ -187,6 +187,29 @@ app.get('/new-users', async (c) => {
   }
 });
 
+// Endpoint to get only pubkeys of new users
+app.get('/new-users-pubkey', async (c) => {
+  try {
+    // Calculate the date 30 days ago
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0]; // YYYY-MM-DD format
+
+    // Query the database for new users, selecting only pubkey
+    const newUsers = await c.env.DB.prepare(
+      'SELECT pubkey FROM users WHERE registration_date >= ? AND existing_user = 0'
+    ).bind(thirtyDaysAgoStr).all();
+
+    // Extract pubkeys and return as JSON array of strings
+    const pubkeys = newUsers.results.map(user => user.pubkey);
+
+    return Response.json(pubkeys);
+  } catch (error) {
+    console.error('Error fetching new users pubkeys:', error);
+    return new Response('Internal Server Error', { status: 500 });
+  }
+});
+
 // Endpoint to get popular users (high PageRank score)
 app.get('/popular-users', async (c) => {
   try {
@@ -214,6 +237,36 @@ app.get('/popular-users', async (c) => {
   }
 });
 
+// Endpoint to get only pubkeys of popular users
+app.get('/popular-users-pubkey', async (c) => {
+  try {
+    // Check if we have PageRank scores in the database
+    const result = await c.env.DB.prepare(
+      'SELECT COUNT(*) as count FROM pagerank_scores'
+    ).first();
+
+    // If no scores, calculate PageRank
+    if (!result || result.count === 0) {
+      // Start calculation in background
+      c.executionCtx.waitUntil(calculateAndSavePageRank(c.env));
+      return new Response('PageRank calculation started. Please try again in a few minutes.', { status: 202 });
+    }
+
+    // Get top 10 users by PageRank score, selecting only pubkey
+    const popularUsers = await c.env.DB.prepare(
+      'SELECT pubkey FROM pagerank_scores ORDER BY score DESC LIMIT 10'
+    ).all();
+
+    // Extract pubkeys and return as JSON array of strings
+    const pubkeys = popularUsers.results.map(user => user.pubkey);
+
+    return Response.json(pubkeys);
+  } catch (error) {
+    console.error('Error fetching popular users pubkeys:', error);
+    return new Response('Internal Server Error', { status: 500 });
+  }
+});
+
 // Endpoint to get isolated users (low PageRank score)
 app.get('/isolated-users', async (c) => {
   try {
@@ -237,6 +290,36 @@ app.get('/isolated-users', async (c) => {
     return Response.json(isolatedUsers.results);
   } catch (error) {
     console.error('Error fetching isolated users:', error);
+    return new Response('Internal Server Error', { status: 500 });
+  }
+});
+
+// Endpoint to get only pubkeys of isolated users
+app.get('/isolated-users-pubkey', async (c) => {
+  try {
+    // Check if we have PageRank scores in the database
+    const result = await c.env.DB.prepare(
+      'SELECT COUNT(*) as count FROM pagerank_scores'
+    ).first();
+
+    // If no scores, calculate PageRank
+    if (!result || result.count === 0) {
+      // Start calculation in background
+      c.executionCtx.waitUntil(calculateAndSavePageRank(c.env));
+      return new Response('PageRank calculation started. Please try again in a few minutes.', { status: 202 });
+    }
+
+    // Get bottom 10 users by PageRank score, selecting only pubkey
+    const isolatedUsers = await c.env.DB.prepare(
+      'SELECT pubkey FROM pagerank_scores ORDER BY score ASC LIMIT 10'
+    ).all();
+
+    // Extract pubkeys and return as JSON array of strings
+    const pubkeys = isolatedUsers.results.map(user => user.pubkey);
+
+    return Response.json(pubkeys);
+  } catch (error) {
+    console.error('Error fetching isolated users pubkeys:', error);
     return new Response('Internal Server Error', { status: 500 });
   }
 });
@@ -326,6 +409,54 @@ app.get('/recent-isolated-users', async (c) => {
     return Response.json(recentIsolatedUsers.results);
   } catch (error) {
     console.error('Error fetching recent isolated users:', error);
+    return new Response('Internal Server Error', { status: 500 });
+  }
+});
+
+// Endpoint to get only pubkeys of users with recent posts and low PageRank scores
+app.get('/recent-isolated-users-pubkey', async (c) => {
+  try {
+    // Calculate the date 30 days ago in UNIX timestamp (seconds)
+    const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+
+    // Check if we have both PageRank scores and last post dates
+    const [pageRankResult, lastPostsResult] = await Promise.all([
+      c.env.DB.prepare('SELECT COUNT(*) as count FROM pagerank_scores').first(),
+      c.env.DB.prepare('SELECT COUNT(*) as count FROM last_posts').first()
+    ]);
+
+    // If no PageRank data, start calculation
+    if (!pageRankResult || pageRankResult.count === 0) {
+      c.executionCtx.waitUntil(calculateAndSavePageRank(c.env));
+      return new Response('PageRank calculation started. Please try again in a few minutes.', { status: 202 });
+    }
+
+    // If no last post data, start collection
+    if (!lastPostsResult || lastPostsResult.count === 0) {
+      c.executionCtx.waitUntil(collectLastPostDates(c.env));
+      return new Response('Last post dates collection started. Please try again in a few minutes.', { status: 202 });
+    }
+
+    // Get users with recent posts and low PageRank scores - optimized with subquery, selecting only pubkey
+    const recentIsolatedUsers = await c.env.DB.prepare(`
+      SELECT lp.pubkey
+      FROM (
+        SELECT pubkey, last_post_date
+        FROM last_posts
+        WHERE last_post_date > ?
+        -- Filter first to reduce the number of rows before joining
+      ) lp
+      JOIN pagerank_scores pr ON lp.pubkey = pr.pubkey
+      ORDER BY pr.score ASC
+      LIMIT 10
+    `).bind(thirtyDaysAgo).all();
+
+    // Extract pubkeys and return as JSON array of strings
+    const pubkeys = recentIsolatedUsers.results.map(user => user.pubkey);
+
+    return Response.json(pubkeys);
+  } catch (error) {
+    console.error('Error fetching recent isolated users pubkeys:', error);
     return new Response('Internal Server Error', { status: 500 });
   }
 });
