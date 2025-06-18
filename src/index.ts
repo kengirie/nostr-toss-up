@@ -47,7 +47,7 @@ app.use('*', cors());
 // Function to fetch the last post date for a user
 async function fetchLastPostDate(pubkeyHex: string): Promise<number> {
   const pool = new SimplePool();
-  const relays = ['wss://yabu.me', 'wss://relay.damus.io', 'wss://relay.nostr.band'];
+  const relays = ['wss://yabu.me', ];
 
   // Subscribe to kind1 events (text posts)
   const filter: Filter = {
