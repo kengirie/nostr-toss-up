@@ -6,9 +6,10 @@ import { cors } from 'hono/cors';
 function containsJapanese(text: string): boolean {
   // Japanese character ranges:
   // Hiragana: \u3040-\u309F
-  // Katakana: \u30A0-\u30FF
+  // Katakana: \u30A0-\u30FF (excluding ツ which is \u30C4)
   // Kanji: \u4E00-\u9FAF
-  const japaneseRegex = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/;
+  // Split Katakana range to exclude ツ (U+30C4)
+  const japaneseRegex = /[\u3040-\u309F\u30A0-\u30C3\u30C5-\u30FF\u4E00-\u9FAF]/;
   return japaneseRegex.test(text);
 }
 
