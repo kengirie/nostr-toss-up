@@ -1,4 +1,6 @@
-import { SimplePool, Filter, Event, nip19 } from 'nostr-tools';
+import { Filter, Event, nip19 } from 'nostr-tools';
+import { NostrFetcher } from 'nostr-fetch';
+
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
@@ -47,50 +49,22 @@ app.use('*', cors());
 
 // Function to fetch the last post date for a user
 async function fetchLastPostDate(pubkeyHex: string): Promise<number> {
-  const pool = new SimplePool();
-  const relays = ['wss://yabu.me', ];
+  const fetcher = NostrFetcher.init();
+  const relayUrls = ["wss://yabu.me"];
 
-  // Subscribe to kind1 events (text posts)
-  const filter: Filter = {
-    kinds: [1],
-    authors: [pubkeyHex],
-    limit: 1 // We only need the most recent one
-  };
+  const events= await fetcher.fetchLatestEvents(
+    relayUrls,
+    /* filter */
+    { kinds: [ 1 ], authors: [pubkeyHex] },
+    /* number of events to fetch */
+    1,
+);
 
   try {
-    // Create a promise to get the events
-    const events: Event[] = await new Promise((resolve) => {
-      const events: Event[] = [];
-
-      const sub = pool.subscribe(relays, filter, {
-        onevent: (event) => {
-          events.push(event);
-        },
-        oneose: () => {
-          // Resolve with collected events when all relays have responded
-          resolve(events);
-          sub.close();
-        }
-      });
-
-      // Set a timeout in case relays don't respond with EOSE
-      setTimeout(() => {
-        resolve(events);
-        sub.close();
-      }, 5000);
-    });
-
-    // Close the pool
-    pool.close(relays);
-
     if (events.length === 0) {
-      return 0; // No posts found
+      return 0;
     }
 
-    // Sort events by created_at (descending) to get the most recent one
-    events.sort((a, b) => b.created_at - a.created_at);
-
-    // Return the created_at timestamp of the most recent event
     return events[0].created_at;
   } catch (error) {
     console.error(`Error fetching last post date for ${pubkeyHex}:`, error);
@@ -469,98 +443,77 @@ app.notFound(() => new Response('Not Found', { status: 404 }));
 export default app;
 
 async function collectJapaneseUsers(env: Env): Promise<void> {
-  // Create a pool to manage relay connections
-  const pool = new SimplePool();
 
-  // Connect to the specified relay
-  const relays = ['wss://yabu.me'];
+const nHoursAgo = (hrs: number): number =>
+  Math.floor((Date.now() - hrs * 60 * 60 * 1000) / 1000);
 
-  // Subscribe to kind0 events (profile metadata)
-  const filter: Filter = {
-    kinds: [0],
-  };
+const fetcher = NostrFetcher.init();
+const relayUrls = ["wss://yabu.me"];
 
-  // Create a subscription using the correct method
-  const subscription = pool.subscribe(relays, filter, {
-    onevent: async (event: Event) => {
-      // Check if the event contains Japanese text
-      if (eventContainsJapanese(event)) {
-        // Extract the pubkey
-        const pubkeyHex = event.pubkey;
-        const pubkey = nip19.npubEncode(pubkeyHex);
+const postIter = fetcher.allEventsIterator(
+    relayUrls,
+    /* filter (kinds, authors, ids, tags) */
+    { kinds: [ 0 ] },
+    /* time range filter (since, until) */
+    { since: nHoursAgo(24) },
+    /* fetch options (optional) */
+    { skipFilterMatching: true }
+);
 
-        if (!pubkey) return;
 
-        console.log(`Found Japanese user: ${pubkey}`);
 
-        try {
-          // Check if the pubkey exists in the database
-          const existingUser = await env.DB.prepare(
-            'SELECT pubkey FROM users WHERE pubkey = ?'
-          ).bind(pubkey).first();
+  for await (const event of postIter) {
+    console.log('onevent', event);
+    // Check if the event contains Japanese text
+    if (eventContainsJapanese(event)) {
+      // Extract the pubkey
+      const pubkeyHex = event.pubkey;
+      const pubkey = nip19.npubEncode(pubkeyHex);
 
-          // If user doesn't exist, insert them with the current date
-          if (!existingUser) {
-            const currentDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+      if (!pubkey) return;
 
-            await env.DB.prepare(
-              'INSERT INTO users (pubkey, registration_date, existing_user) VALUES (?, ?, 0)'
-            ).bind(pubkey, currentDate).run();
+      console.log(`Found Japanese user: ${pubkey}`);
 
-            console.log(`Added new user with pubkey: ${pubkey}`);
-          }
-        } catch (error) {
-          console.error(`Error processing pubkey ${pubkey}:`, error);
+      try {
+        // Check if the pubkey exists in the database
+        const existingUser = await env.DB.prepare(
+          'SELECT pubkey FROM users WHERE pubkey = ?'
+        ).bind(pubkey).first();
+
+        // If user doesn't exist, insert them with the current date
+        if (!existingUser) {
+          const currentDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+
+          await env.DB.prepare(
+            'INSERT INTO users (pubkey, registration_date, existing_user) VALUES (?, ?, 0)'
+          ).bind(pubkey, currentDate).run();
+
+          console.log(`Added new user with pubkey: ${pubkey}`);
         }
+      } catch (error) {
+        console.error(`Error processing pubkey ${pubkey}:`, error);
       }
     }
-  });
+  }
 
-  // Let the subscription run for a while (e.g., 5 minutes)
-  await new Promise(resolve => setTimeout(resolve, 5 * 60 * 1000));
-
-  // Close the subscription and pool
-  subscription.close();
-  pool.close(relays);
 }
 
 // Function to fetch kind3 events (follow lists) for a user
 async function fetchFollowList(pubkeyHex: string): Promise<string[]> {
-  const pool = new SimplePool();
-  const relays = ['wss://yabu.me', 'wss://relay.damus.io', 'wss://relay.nostr.band'];
+  const fetcher = NostrFetcher.init();
+const relayUrls = ["wss://yabu.me"];
 
-  // Subscribe to kind3 events (contacts/follows)
-  const filter: Filter = {
-    kinds: [3],
-    authors: [pubkeyHex],
-    limit: 1 // We only need the most recent one
-  };
+
+  const events= await fetcher.fetchLatestEvents(
+    relayUrls,
+    /* filter */
+    { kinds: [ 3 ], authors: [pubkeyHex] },
+    /* number of events to fetch */
+    1,
+);
 
   try {
-    // Create a promise to get the events
-    const events: Event[] = await new Promise((resolve) => {
-      const events: Event[] = [];
 
-      const sub = pool.subscribe(relays, filter, {
-        onevent: (event) => {
-          events.push(event);
-        },
-        oneose: () => {
-          // Resolve with collected events when all relays have responded
-          resolve(events);
-          sub.close();
-        }
-      });
-
-      // Set a timeout in case relays don't respond with EOSE
-      setTimeout(() => {
-        resolve(events);
-        sub.close();
-      }, 5000);
-    });
-
-    // Close the pool
-    pool.close(relays);
 
     if (events.length === 0) {
       return [];
