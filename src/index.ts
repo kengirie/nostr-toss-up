@@ -9,9 +9,8 @@ function containsJapanese(text: string): boolean {
   // Japanese character ranges:
   // Hiragana: \u3040-\u309F
   // Katakana: \u30A0-\u30FF (excluding ツ which is \u30C4)
-  // Kanji: \u4E00-\u9FAF
   // Split Katakana range to exclude ツ (U+30C4)
-  const japaneseRegex = /[\u3040-\u309F\u30A0-\u30C3\u30C5-\u30FF\u4E00-\u9FAF]/;
+  const japaneseRegex = /[\u3040-\u309F\u30A0-\u30C3\u30C5-\u30FF]/;
   return japaneseRegex.test(text);
 }
 
@@ -445,21 +444,21 @@ const handler: ExportedHandler<Env> = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     return app.fetch(request, env, ctx);
   },
-  
+
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     const cron = controller.cron;
-    
+
     // Hourly tasks (every hour)
     if (cron === '0 * * * *') {
       console.log('Running hourly scheduled tasks...');
-      
+
       // Run all three tasks in parallel
       await Promise.all([
         collectJapaneseUsers(env),
         calculateAndSavePageRank(env),
         collectLastPostDates(env)
       ]);
-      
+
       console.log('Hourly scheduled tasks completed');
     }
   }
