@@ -47,6 +47,7 @@ const app = new Hono<{ Bindings: Env }>();
 // Add CORS middleware
 app.use('*', cors());
 
+
 // Function to fetch the last post date for a user
 async function fetchLastPostDate(pubkeyHex: string): Promise<number> {
   const fetcher = NostrFetcher.init();
@@ -439,8 +440,32 @@ app.get('/recent-isolated-users-pubkey', async (c) => {
 // Default 404 handler
 app.notFound(() => new Response('Not Found', { status: 404 }));
 
-// Export the Hono app as the default handler
-export default app;
+// Cloudflare Workers handler with scheduled tasks
+const handler: ExportedHandler<Env> = {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    return app.fetch(request, env, ctx);
+  },
+  
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    const cron = controller.cron;
+    
+    // Hourly tasks (every hour)
+    if (cron === '0 * * * *') {
+      console.log('Running hourly scheduled tasks...');
+      
+      // Run all three tasks in parallel
+      await Promise.all([
+        collectJapaneseUsers(env),
+        calculateAndSavePageRank(env),
+        collectLastPostDates(env)
+      ]);
+      
+      console.log('Hourly scheduled tasks completed');
+    }
+  }
+};
+
+export default handler;
 
 async function collectJapaneseUsers(env: Env): Promise<void> {
 
