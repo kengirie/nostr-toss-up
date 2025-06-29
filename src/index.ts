@@ -446,21 +446,27 @@ const handler: ExportedHandler<Env> = {
   },
 
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    const cron = controller.cron;
-
-    // Hourly tasks (every hour)
-    if (cron === '0 * * * *') {
-      console.log('Running hourly scheduled tasks...');
-
-      // Run all three tasks in parallel
-      await Promise.all([
-        collectJapaneseUsers(env),
-        calculateAndSavePageRank(env),
-        collectLastPostDates(env)
-      ]);
-
-      console.log('Hourly scheduled tasks completed');
+    switch (controller.cron) {
+      case '15 * * * *':
+        // Every 15 minutes - collect Japanese users
+        console.log('Running collectJapaneseUsers...');
+        await collectJapaneseUsers(env);
+        console.log('collectJapaneseUsers completed');
+        break;
+      case '30 * * * *':
+        // Every 30 minutes - collect last posts
+        console.log('Running collectLastPostDates...');
+        await collectLastPostDates(env);
+        console.log('collectLastPostDates completed');
+        break;
+      case '0 * * * *':
+        // Every hour - calculate PageRank
+        console.log('Running calculateAndSavePageRank...');
+        await calculateAndSavePageRank(env);
+        console.log('calculateAndSavePageRank completed');
+        break;
     }
+    console.log('cron processed');
   }
 };
 
